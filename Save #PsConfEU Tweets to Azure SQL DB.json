@@ -1,0 +1,236 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "logicAppName": {
+            "type": "String",
+            "metadata": {
+                "description": "Name of the logic app."
+            }
+        },
+        "logicAppLocation": {
+            "defaultValue": "[resourceGroup().location]",
+            "allowedValues": [
+                "eastasia",
+                "southeastasia",
+                "centralus",
+                "eastus",
+                "eastus2",
+                "westus",
+                "northcentralus",
+                "southcentralus",
+                "northeurope",
+                "westeurope",
+                "japanwest",
+                "japaneast",
+                "brazilsouth",
+                "australiaeast",
+                "australiasoutheast",
+                "southindia",
+                "centralindia",
+                "westindia",
+                "canadacentral",
+                "canadaeast",
+                "westcentralus",
+                "westus2",
+                "[resourceGroup().location]"
+            ],
+            "type": "String",
+            "metadata": {
+                "description": "Location of the logic app."
+            }
+        },
+        "cognitiveservicestextanalytics_Connection_Name": {
+            "defaultValue": "cognitiveservicestextanalytics",
+            "type": "String",
+            "metadata": {
+                "description": "Name of the connection."
+            }
+        },
+        "sql_Connection_Name": {
+            "defaultValue": "sql",
+            "type": "String",
+            "metadata": {
+                "description": "Name of the connection."
+            }
+        },
+        "twitter_Connection_Name": {
+            "defaultValue": "twitter",
+            "type": "String",
+            "metadata": {
+                "description": "Name of the connection."
+            }
+        }
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Logic/workflows",
+            "name": "[parameters('logicAppName')]",
+            "apiVersion": "2016-06-01",
+            "location": "[parameters('logicAppLocation')]",
+            "properties": {
+                "state": "Disabled",
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "$connections": {
+                            "defaultValue": {},
+                            "type": "Object"
+                        },
+                        "$authentication": {
+                            "defaultValue": {},
+                            "type": "SecureObject"
+                        }
+                    },
+                    "triggers": {
+                        "When_a_new_tweet_appears": {
+                            "recurrence": {
+                                "interval": 1,
+                                "frequency": "Minute"
+                            },
+                            "splitOn": "@triggerBody()?.value",
+                            "metadata": {
+                                "flowSystemMetadata": {
+                                    "swaggerOperationId": "OnNewTweet"
+                                }
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['twitter']['connectionId']"
+                                    }
+                                },
+                                "method": "get",
+                                "path": "/onnewtweet",
+                                "queries": {
+                                    "searchQuery": "#PSConfEU"
+                                },
+                                "authentication": "@parameters('$authentication')"
+                            },
+                            "conditions": []
+                        }
+                    },
+                    "actions": {
+                        "Detect_Sentiment": {
+                            "runAfter": {},
+                            "metadata": {
+                                "flowSystemMetadata": {
+                                    "swaggerOperationId": "DetectSentiment"
+                                }
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['cognitiveservicestextanalytics']['connectionId']"
+                                    }
+                                },
+                                "method": "post",
+                                "path": "/sentiment",
+                                "body": {
+                                    "text": "@triggerBody()?['TweetText']"
+                                },
+                                "authentication": "@parameters('$authentication')"
+                            }
+                        },
+                        "Execute_stored_procedure": {
+                            "runAfter": {
+                                "Detect_Sentiment": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "metadata": {
+                                "flowSystemMetadata": {
+                                    "swaggerOperationId": "ExecuteProcedure"
+                                }
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['sql']['connectionId']"
+                                    }
+                                },
+                                "method": "post",
+                                "path": "/datasets/default/procedures/@{encodeURIComponent(encodeURIComponent('[dbo].[InsertTweet]'))}",
+                                "body": {
+                                    "__PowerAppsId__": "0",
+                                    "Date": "@triggerBody()?['CreatedAtIso']",
+                                    "Sentiment": "@{body('Detect_Sentiment')?['score']}",
+                                    "Tweet": "@triggerBody()?['TweetText']",
+                                    "UserLocation": "@triggerBody()?['UserDetails']?['Location']",
+                                    "UserName": "@triggerBody()?['TweetedBy']"
+                                },
+                                "authentication": "@parameters('$authentication')"
+                            }
+                        }
+                    }
+                },
+                "parameters": {
+                    "$connections": {
+                        "value": {
+                            "cognitiveservicestextanalytics": {
+                                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', parameters('logicAppLocation'), '/managedApis/', 'cognitiveservicestextanalytics')]",
+                                "connectionId": "[resourceId('Microsoft.Web/connections', parameters('cognitiveservicestextanalytics_Connection_Name'))]",
+                                "connectionName": "[parameters('cognitiveservicestextanalytics_Connection_Name')]"
+                            },
+                            "sql": {
+                                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', parameters('logicAppLocation'), '/managedApis/', 'sql')]",
+                                "connectionId": "[resourceId('Microsoft.Web/connections', parameters('sql_Connection_Name'))]",
+                                "connectionName": "[parameters('sql_Connection_Name')]"
+                            },
+                            "twitter": {
+                                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', parameters('logicAppLocation'), '/managedApis/', 'twitter')]",
+                                "connectionId": "[resourceId('Microsoft.Web/connections', parameters('twitter_Connection_Name'))]",
+                                "connectionName": "[parameters('twitter_Connection_Name')]"
+                            }
+                        }
+                    }
+                }
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Web/connections', parameters('cognitiveservicestextanalytics_Connection_Name'))]",
+                "[resourceId('Microsoft.Web/connections', parameters('sql_Connection_Name'))]",
+                "[resourceId('Microsoft.Web/connections', parameters('twitter_Connection_Name'))]"
+            ]
+        },
+        {
+            "type": "Microsoft.Web/connections",
+            "name": "[parameters('cognitiveservicestextanalytics_Connection_Name')]",
+            "apiVersion": "2016-06-01",
+            "location": "[parameters('logicAppLocation')]",
+            "properties": {
+                "api": {
+                    "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', parameters('logicAppLocation'), '/managedApis/', 'cognitiveservicestextanalytics')]"
+                },
+                "displayName": "[parameters('cognitiveservicestextanalytics_Connection_Name')]"
+            }
+        },
+        {
+            "type": "Microsoft.Web/connections",
+            "name": "[parameters('sql_Connection_Name')]",
+            "apiVersion": "2016-06-01",
+            "location": "[parameters('logicAppLocation')]",
+            "properties": {
+                "api": {
+                    "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', parameters('logicAppLocation'), '/managedApis/', 'sql')]"
+                },
+                "displayName": "[parameters('sql_Connection_Name')]"
+            }
+        },
+        {
+            "type": "Microsoft.Web/connections",
+            "name": "[parameters('twitter_Connection_Name')]",
+            "apiVersion": "2016-06-01",
+            "location": "[parameters('logicAppLocation')]",
+            "properties": {
+                "api": {
+                    "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', parameters('logicAppLocation'), '/managedApis/', 'twitter')]"
+                },
+                "displayName": "[parameters('twitter_Connection_Name')]"
+            }
+        }
+    ]
+}
